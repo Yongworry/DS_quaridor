@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <head>
+        <title>DS Quaridor</title>
+        <style>
+          /*drawing board*/
+          * { padding: 0; margin: 0; }
+          #canvas { background: #fff; display: block; margin: 0 auto; grid-column: 1/2; grid-row:1/3; justify-self:end; border-style:solid}
+          #grid {display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; border-style: solid;}
+
+          /*ingame design*/
+          body { margin: 0; padding-bottom: 3rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;}
+    
+          #form { background: rgba(0, 0, 0, 0.15); display:flex; padding: 0.25rem; bottom: 0; left: 0; right: 0; height: 3rem;  box-sizing: border-box; backdrop-filter: blur(10px);}
+          #form { background: rgba(70, 70, 70, 0.15); display:flex; padding: 0.25rem; bottom: 0; left: 0; right: 0; height: 3rem;  box-sizing: border-box; backdrop-filter: blur(10px);}
+          #input { border: none; padding: 0 1rem; flex-grow: 1; border-radius: 2rem; margin: 0.25rem; }
+          #input:focus { outline: none;}
+          #form > button { background: #333; border: none; padding: 0 1rem; margin: 0.25rem; border-radius: 3px; outline: none; color: #fff; }
+    
+          #messages { list-style-type: none; margin: 0; padding: 0; grid-row:1/2; grid-column:2/3; border-style:solid}
+          #messages > li { padding: 0.5rem 1rem; }
+          #chatting { list-style-type: none; margin: 0; padding: 0; grid-row:2/3; grid-column:2/3; border-style:solid}
+          #chatting > li { padding: 0.5rem 1rem; }
+        </style>
+  </head>
+  
+  <body>
+    <div id='grid'>
+        <canvas id="canvas" width="620" height="620"></canvas>
+        <ul id='messages'></ul>
+        <ul id='chatting'></ul>
+    </div>
+    <form id='form' action=''>
+        <input id='input' autocomplete='off' /><button>Send</button>
+    </form>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        var socket = io();
+
+        var messages = document.getElementById('messages');
+        var chatting = document.getElementById('chatting');
+        var form = document.getElementById('form');
+        var input = document.getElementById('input');
+        var cur_player = 0;
+        var player = 0;
+
+        var canvas = document.getElementById("canvas");
+        var ctx = canvas.getContext('2d');
+        const width = 60;
+        const height = 60;
+        const term = 10;
+        const radius = 20;
+
+        socket.on('player assign', function(msg) {
+            messages.textContent = '';
+            chatting.textContent = '';
+            var item = document.createElement('li');
+            var blocknumber = document.createElement('li');
+            item.textContent = msg;
+            messages.appendChild(item);
+            blocknumber.textContent = "You have 10 blocks";
+            messages.appendChild(blocknumber);
+        });  
+        
+        socket.on('player', function(msg) {
+            player = msg;
+        });
+        /*
+        socket.on('error', function(msg) {
+            var item = document.createElement('li');
+            item.textContent = msg;
+            messages.appendChild(item);
+            console.log(msg);
+        });
+        */
+        
+        socket.on('new board', function(msg) {
+            draw(ctx, msg[0], msg[1]);
+        });
+
+        socket.on('viewfirst', function(msg){
+            var blockcolor = 'rgb(100, 100, 100)';
+            draw(ctx, msg[0], msg[1]);
+            draw_block(ctx, msg[2][1], msg[2][0], width, height, term, blockcolor, msg[2][2]);
+        });
+
+        socket.on('viewboard', function(msg){
+            draw(ctx, msg[0], msg[1]);
+        })
+
+        socket.on('playerview', function(msg){
+            var playercolor = 'rgb(100, 100, 100)';
+            var ppos = [msg[2][0], msg[2][1]];
+            draw(ctx, msg[0], msg[1]);
+            ctx.beginPath();
+            ctx.arc(ppos[1] * (width + term) + width / 2, ppos[0] * (height + term) + height / 2, radius, 0, Math.PI*2);
+            ctx.fillStyle = playercolor;
+            ctx.fill();
+            ctx.closePath();
+        })
+
+        socket.on('after turn', function(msg) {
+            draw(ctx, msg[0], msg[1]);
+            cur_player = 1 - cur_player;
+        });
+
+        socket.on('remainblock', function(msg){
+            var item = document.createElement('li');
+            item.textContent = "You have " +msg + " blocks";
+            messages.removeChild(messages.childNodes[1]);
+            messages.appendChild(item);
+        })
+
+        socket.on('game end', function(msg){
+            ctx.clearRect(0, 0, 620, 620);
+            messages.textContent = '';
+            chatting.textContent = '';
+            if (msg === 0){
+                window.location.href = "./p0win.html";
+            }   else if (msg === 1){
+                window.location.href = "./p1win.html";
+            }
+        });
+
+        socket.on('chat', function(msg){
+            var len = chatting.childElementCount;
+            var item = document.createElement('li');
+            item.textContent = 'p'+msg[0] +': '+msg[1];
+            if (len > 7){
+                chatting.removeChild(chatting.childNodes[0]);
+            }
+            chatting.appendChild(item);
+        })
+
+        form.addEventListener('submit', function(e){
+            e.preventDefault();
+            if (input.value){
+                socket.emit('chat', [player, input.value]);
+                input.value = '';
+            };
+        });
+
+        canvas.addEventListener("mousemove", function(e){
+            const x = Math.floor(e.offsetY / (height + term));
+            const y = Math.floor(e.offsetX / (width + term));
+            const rx = e.offsetY % (height + term);
+            const ry = e.offsetX % (width + term);
+            if (x > 8 || y > 8 || x < 0 || y < 0) {
+                var msg = false;
+            }   else if ((x === 8 && ry >= width) || (y === 8 && rx >= width)) {
+                var msg = false;
+            }   else if (rx < height && ry < width) {
+                var msg = [x, y];
+            }   else {
+                    if (rx < height && ry >= width) {
+                        if (x===8 || y===8){
+                            var msg = false;
+                        }   else{
+                            var msg =  [x, y, 1];
+                        }
+                    }
+                    else {
+                        if (x===8 || y===8){
+                            var msg = false;
+                        }   else{
+                            var msg = [x, y, 0];
+                        }
+                    };
+                };
+            socket.emit("onmouse", [msg,player]);
+        });
+
+        canvas.addEventListener("click", function(e){
+            const x = Math.floor(e.offsetY / (height + term));
+            const y = Math.floor(e.offsetX / (width + term));
+            const rx = e.offsetY % (height + term);
+            const ry = e.offsetX % (width + term);
+            if (x > 8 || y > 8 || x < 0 || y < 0) {
+                var msg = false;
+            }   else if ((x === 8 && ry >= width) || (y === 8 && rx >= width)) {
+                var msg = false;
+            }   else if (rx < height && ry < width) {
+                var msg = [x, y];
+            }   else {
+                    if (rx < height && ry >= width) {
+                        var msg =  [x, y, 1];
+                    }
+                    else {
+                        var msg = [x, y, 0];
+                    };
+                };
+            socket.emit("input", [msg,player]);
+        })
+
+        function draw(ctx, board, position) {
+            if (canvas.getContext) {
+                
+                const radius_player = 20;
+                const color_player = ['rgb(192,0,0)', 'rgb(47,85,151)'];
+                const color = 'rgb(217,217,217)';
+                const color2 = 'rgb(0,0,0)';
+                var block_board = board;
+                var players_positions = position;
+
+                ctx.clearRect(0, 0, 620, 620);
+                draw_board(ctx, width, height, term, radius, color);
+                set_block(ctx, block_board, width, height, term, color2)
+                draw_player(ctx, players_positions, radius_player, width, height, term, color_player)
+            }
+        }
+
+        function draw_player(ctx, position, radius, width, height, term, color) {
+            for (var i = 0; i < 2; i++) {
+                ctx.beginPath();
+                ctx.arc(position[i][1] * (width + term) + width / 2, position[i][0] * (height + term) + height / 2, radius, 0, Math.PI*2);
+                ctx.fillStyle = color[i];
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        function set_block(ctx, block_board, width, height, term, color) {
+            for (var i = 0; i < 8; i++) {
+                for (var j = 0; j < 8; j++) {
+                    draw_block(ctx, j, i, width, height, term, color, block_board[i][j])
+                }
+            }
+        }
+
+        function draw_board(ctx, width, height, term, radius, color) {
+            for (var i = 0; i < 9; i++) {
+                for (var j = 0; j < 9; j++) {
+                    rounded_rectangle(ctx, i * (width + term), j * (height + term), width, height, radius, color);
+                }
+            }
+        }
+
+        function draw_block(ctx, x, y, width, height, term, color, orientation) {
+            if (orientation == 0) {
+                rounded_rectangle(ctx, x * (width + term), height + y * (height + term), 2 * width + term, term, term / 2, color);
+            }
+            else {
+                if (orientation == 1) {
+                    rounded_rectangle(ctx, width + x * (width + term), y * (width + term), term, 2 * height + term, term / 2, color);
+                }
+            }
+        }
+
+        function rounded_rectangle(ctx, x, y, width, height, radius, color) {
+            ctx.beginPath();
+            ctx.moveTo(x, y + radius);
+            ctx.lineTo(x, y + height - radius);
+            ctx.arcTo(x, y + height, x + radius, y + height, radius);
+            ctx.lineTo(x + width - radius, y + height);
+            ctx.arcTo(x + width, y + height, x + width, y + height-radius, radius);
+            ctx.lineTo(x + width, y + radius);
+            ctx.arcTo(x + width, y, x + width - radius, y, radius);
+            ctx.lineTo(x + radius, y);
+            ctx.arcTo(x, y, x, y + radius, radius);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+   
+
+    </script>
+  </body>
+</html>
